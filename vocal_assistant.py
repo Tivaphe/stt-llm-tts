@@ -16,6 +16,24 @@ SAMPLE_RATE = 16000
 CHUNK_SIZE = 8000
 SILENCE_THRESHOLD = 2.0  # Durée du silence en secondes pour arrêter l'enregistrement
 
+def list_audio_devices(p):
+    """Liste tous les périphériques d'entrée audio disponibles."""
+    print("Liste des périphériques audio d'entrée :")
+    info = p.get_host_api_info_by_index(0)
+    num_devices = info.get('deviceCount')
+    for i in range(num_devices):
+        device_info = p.get_device_info_by_host_api_device_index(0, i)
+        if device_info.get('maxInputChannels') > 0:
+            print(f"  - Périphérique {i}: {device_info.get('name')}")
+
+def get_default_input_device_info(p):
+    """Retourne les informations du périphérique d'entrée par défaut."""
+    try:
+        return p.get_default_input_device_info()
+    except IOError as e:
+        print(f"Avertissement : Impossible de trouver le périphérique d'entrée par défaut. Erreur : {e}")
+        return None
+
 def download_and_unzip_model():
     """Télécharge et décompresse le modèle Vosk si non présent."""
     if os.path.exists(MODEL_PATH):
@@ -65,6 +83,31 @@ p = None
 stream = None
 try:
     p = pyaudio.PyAudio()
+    list_audio_devices(p)
+
+    default_device_info = get_default_input_device_info(p)
+    if default_device_info:
+        default_index = default_device_info['index']
+        default_name = default_device_info['name']
+        prompt = f"Entrez l'index du périphérique (ou laissez vide pour utiliser le périphérique par défaut : {default_index} - {default_name}) : "
+    else:
+        prompt = "Entrez l'index du périphérique : "
+
+    try:
+        input_device_index_str = input(prompt)
+        if input_device_index_str.strip():
+            INPUT_DEVICE_INDEX = int(input_device_index_str)
+        elif default_device_info:
+            INPUT_DEVICE_INDEX = default_device_info['index']
+
+    except ValueError:
+        print("Entrée invalide. Utilisation du périphérique par défaut si disponible.")
+        if default_device_info:
+            INPUT_DEVICE_INDEX = default_device_info['index']
+    except Exception as e:
+        print(f"Une erreur est survenue lors de la sélection du périphérique : {e}")
+        exit()
+
     stream = p.open(format=pyaudio.paInt16,
                     channels=1,
                     rate=SAMPLE_RATE,
