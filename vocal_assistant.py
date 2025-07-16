@@ -1,11 +1,13 @@
 import vosk
 import pyaudio
-import pyttsx3
 import json
 import os
 import requests
 import zipfile
 import io
+import torch
+from transformers import AutoProcessor, AutoModelForTextToWaveform
+import soundfile as sf
 
 # --- Configuration ---
 MODEL_NAME = "vosk-model-fr-0.22"
@@ -49,21 +51,12 @@ download_and_unzip_model()
 
 # --- Initialisation TTS (Text-to-Speech) ---
 try:
-    engine = pyttsx3.init()
-    voices = engine.getProperty('voices')
-    # Recherche d'une voix française
-    fr_voice_id = None
-    for voice in voices:
-        if "french" in voice.languages or "fr-FR" in voice.name:
-            fr_voice_id = voice.id
-            break
-    if fr_voice_id:
-        engine.setProperty('voice', fr_voice_id)
-    else:
-        print("Avertissement : Aucune voix française trouvée. Utilisation de la voix par défaut.")
+    tts_processor = AutoProcessor.from_pretrained("parler-tts/parler-tts-mini-multilingual-v1.1")
+    tts_model = AutoModelForTextToWaveform.from_pretrained("parler-tts/parler-tts-mini-multilingual-v1.1")
+    print("Modèle TTS chargé.")
 except Exception as e:
-    print(f"Erreur lors de l'initialisation de la synthèse vocale (TTS) : {e}")
-    engine = None
+    print(f"Erreur lors du chargement du modèle TTS : {e}")
+    tts_model = None
 
 # --- Initialisation STT (Speech-to-Text) ---
 if not os.path.exists(MODEL_PATH):
@@ -99,9 +92,30 @@ except Exception as e:
 def speak(text):
     """Prononce la réponse de l'assistant via TTS et l'affiche."""
     print(f"Assistant > {text}")
-    if engine:
-        engine.say(text)
-        engine.runAndWait()
+    if tts_model and tts_processor:
+        inputs = tts_processor(text, return_tensors="pt")
+        audio_array = tts_model.generate(**inputs)
+        audio_array = audio_array.cpu().numpy().squeeze()
+        sf.write("output.wav", audio_array, tts_model.config.sampling_rate)
+
+        # Jouer le fichier audio
+        try:
+            p = pyaudio.PyAudio()
+            wf = sf.SoundFile("output.wav")
+            stream = p.open(format=p.get_format_from_width(wf.format_info.width),
+                            channels=wf.channels,
+                            rate=wf.samplerate,
+                            output=True)
+            data = wf.read(1024, dtype='int16')
+            while len(data) > 0:
+                stream.write(data.tobytes())
+                data = wf.read(1024, dtype='int16')
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+            os.remove("output.wav")
+        except Exception as e:
+            print(f"Erreur lors de la lecture du fichier audio : {e}")
 
 def listen():
     """Capture l'audio du micro, détecte le silence et retourne le texte reconnu."""

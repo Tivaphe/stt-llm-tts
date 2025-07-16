@@ -2,3 +2,6 @@ vosk
 pyaudio
 pyttsx3
 requests
+torch
+transformers
+soundfile
